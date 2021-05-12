@@ -1,6 +1,7 @@
 // Biblioteca para controlar LCD 16x2
 #include <LiquidCrystal.h>
 #include <Servo.h>
+#include <Keypad.h>
 
 #define SERIAL 9600
 
@@ -38,12 +39,21 @@ char teclas[fil][col] =
         {'4', '5', '6', 'B'},
         {'7', '8', '9', 'C'},
         {'*', '0', '#', 'D'}};
+Keypad teclado4x4 = Keypad(makeKeymap(teclas), pin_fil, pin_col, fil, col);
 
 //SENSOR DE PROXIMIDAD
-#define PIN_SENSOR 13
+#define PIN_PROX 13
 //PIN DEL SERVOMOTOR
 #define PIN_SERVO = 12;
 
+//constantes de conversion de temperatura
+#define VOLT 5.0
+#define MIN_TEMP 50
+#define LECTURAMAX_TEMP 1024
+#define EQUIVALENCIA 100
+#define TEMP_TOPE 60
+#define DIST_EQUI 0.01723
+#define DIST_TOPE 100
 
 unsigned long tiempo_actual = 0;
 unsigned long tiempo_anterior = 0;
@@ -97,6 +107,11 @@ int direccion;
 bool mision_ok = false;
 
 int estado_actual = EST_REPOSO; //estado inical del sistema
+bool abort_temp = false;        //abortar mision por temperatura
+bool abort_manual = false;      //abortar mision manualmente
+bool obst_encontrado = false;   //registra si se esta detectando un obstaculo o no
+
+char tecla;
 
 /**
  * cero lugar sin explorar
@@ -115,16 +130,20 @@ void init_matriz()
   pos_y = pos_x = NUM_0;
   direccion = ESTE;
 }
-/**
- * leectura directo del sensor de proximidad
- * 
- */
-int leer_sensor_prox()
+
+void imprimir_matriz()
 {
-  if () // NO HAY OSTACULO
-    return LIBRE;
-  return OBSTACULO;
+  for (int i = NUM_0; i < tam_mtx; i++)
+  {
+    for (int j = NUM_0; j < tam_mtx; j++)
+    {
+      Serial.print(matriz[i][j] );
+      Serial.print("  ");
+    }
+    Serial.println();
+  }
 }
+
 /*
  * CAPTURA Y CONVERSION DEL SENSOR DE PROXIMIDAD
  */
@@ -176,12 +195,21 @@ void ingreso_coordenadas()
       error = false;
     }
     /* CAPTURA DE COORDENADAS POR TECLADO */
-    //lectura del coor x
-    //escritura de coor x
-    //lectura del coor y
-    //escritura de coor y
+    do
+    {
+      lcd.print("Ingrese coor X...");
+      pos_dest_x = teclado4x4.getKey();
+    } while (pos_dest_x);
+    lcd.clear();
+    do
+    {
+      lcd.print("Ingrese coor Y...");
+      pos_dest_y = teclado4x4.getKey();
+    } while (pos_dest_y);
+
     error = true;
   } while (pos_dest_x < tam_mtx && pos_dest_y < tam_mtx);
+  lcd.clear();
   lcd.setCursor(0, 1);
   lcd.print("COORDENADAS OK ");
 }
@@ -193,9 +221,9 @@ bool control_caos()
 {
   if (pos_x == pos_dest_x && pos_y == pos_dest_y) //dispositiovo llego a destino
     return true;
-  if () //finalizacion de mision manualmente por teclado
+  if (abort_manual) //finalizacion de mision manualmente por teclado
     return true;
-  if () //finalizacin por deteccion de presencia por parte del senseor de temperatura
+  if (abort_temp) //finalizacin por deteccion de presencia por parte del senseor de temperatura
     return true;
   return false;
 }
@@ -220,15 +248,14 @@ void actualizar_motor()
 }
 /**
  * llegada al destino, retornando al origen por ruta marcada
- */ 
+ */
 void retornar()
 {
-
 }
 
 /**
  * obstaculo detectad, recalculado ruta
- */ 
+ */
 void recalculando_ruta()
 {
 }
@@ -251,7 +278,7 @@ int evaluar_estado_actual()
 {
   if (control_caos() == true)
     estado_actual = EST_RETORNOO;
-  else if (leer_sensor_prox() == OBSTACULO)
+  else if (obst_encontrado)
     estado_actual = EST_OSTACULO;
   else if (mision_ok) //mision finalizada
     estado_actual = EST_REPOSO;
@@ -273,6 +300,7 @@ void maquinadeEstado()
   {
   case (EST_REPOSO): // estado inicial
     lcd.print("ESTADO EN REPOPSO");
+    init_matriz();
     ingreso_coordenadas();
     break;
   case (EST_MOV): //dispositivo en movimiento
@@ -306,14 +334,44 @@ void actualizar_lcd()
 {
 }
 
+int leer_ultrasonido()
+{
+  pinMode(PIN_PROX, OUTPUT);
+  // limpio el TRIGGER
+  digitalWrite(PIN_PROX, LOW);
+  delayMicroseconds(2);
+  //pongo HIGH el trigger por 10 microsegundos
+  digitalWrite(PIN_PROX, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_PROX, LOW);
+  pinMode(PIN_PROX, INPUT);
+
+  //Leo la señal ECHO y retorno distancia
+  return (int)(DIST_EQUI * pulseIn(PIN_PROX, HIGH));
+}
+leer_sensores()
+{
+  int temp_actual = (int)((VOLT / LECTURAMAX_TEMP * analogRead(SENSOR_TEMP)) * EQUIVALENCIA - MIN_TEMP);
+  if (temp_actual > TEMP_TOPE)
+    abort_temp = true;
+  tecla = teclado4x4.getKey();
+  if (tecla && tecla == "A")
+    abort_manual = true;
+
+  if (leer_ultrasonido < DIST_TOPE)
+    obst_encontrado = true;
+  else
+    obst_encontrado = false;
+}
+
 void setup()
 {
   Serial.begin(SERIAL);
 
   lcd.begin(COL_DISPLAY, ROW_DISPLAY); //display de estado del sistema
-  iniciar_lcd();
+  //iniciar_lcd();
   Servo.attach(PIN_SERVO);
-  pinMode(PIN_MOTOR, OUTPUT); //MOTOR
+  pinMode(PIN_MOTOR, OUTPUT);  //MOTOR
   pinMode(SENSOR_TEMP, INPUT); //sensor de temperatura
 }
 
@@ -328,6 +386,7 @@ void loop()
   {
     // Actualizo el tiempo anterior.
     tiempo_anterior = tiempo_actual;
+    leer_sensores();
     maquinadeEstado();
   }
 }
