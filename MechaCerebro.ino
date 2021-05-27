@@ -17,6 +17,10 @@
 #define COL_DISPLAY 16
 #define ROW_DISPLAY 2
 
+//SENSOR DE PROXIMIDAD
+#define PIN_PROX 13
+//PIN DEL SERVOMOTOR
+#define PIN_SERVO 12
 #define PIN_MOTOR A4
 //PINS TECLADO
 #define PIN_COL_1 7
@@ -41,11 +45,7 @@ char teclas[fil][col] =
         {'*', '0', '#', 'D'}};
 Keypad teclado4x4 = Keypad(makeKeymap(teclas), pin_fil, pin_col, fil, col);
 
-//SENSOR DE PROXIMIDAD
-#define PIN_PROX 13
-//PIN DEL SERVOMOTOR
-#define PIN_SERVO = 12;
-
+Servo servoMotor;
 //constantes de conversion de temperatura
 #define VOLT 5.0
 #define MIN_TEMP 50
@@ -57,6 +57,8 @@ Keypad teclado4x4 = Keypad(makeKeymap(teclas), pin_fil, pin_col, fil, col);
 
 unsigned long tiempo_actual = 0;
 unsigned long tiempo_anterior = 0;
+unsigned long tiempo_actual_2 = 0;
+unsigned long tiempo_anterior_2 = 0;
 
 //Crear el objeto LCD con los números correspondientes (rs, en, d4, d5, d6, d7)
 LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PIN_LCD_D7);
@@ -65,7 +67,8 @@ LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PI
 
 #define CARGA_VOLT 2.52
 
-#define TIEMPO_MAX_MILIS 250 // 0.25 segundo.
+#define TIEMPO_MAX_MILIS 250   // 0.25 segundo.
+#define TIEMPO_MAX_MILIS_2 500 // 0.5 segundo.
 
 #define ACTIVADO 1
 #define DESACTIVADO 0
@@ -80,15 +83,17 @@ LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PI
 #define EST_REPOSO 0
 #define EST_MOV 1
 #define EST_OSTACULO 2
-#define EST_RETORNOO 3
+#define EST_RETORNO 3
 
-#define NORTE 11
-#define OESTE 22
-#define SUR 33
-#define ESTE 44
+#define NORTE 0
+#define ESTE 1
+#define SUR 2
+#define OESTE 3
 
 #define LIBRE 11
 #define OBSTACULO 66
+#define RECORRIDO 1
+#define DISPO 8
 
 #define NUM_100 100
 #define NUM_0 0
@@ -97,13 +102,18 @@ LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PI
 #define NUM_7 7
 #define NUM_8 8
 
+#define DIR_90 90
+#define DIR_0 0
+#define DIR_180 180
+#define DIR_360 360
 #define tam_mtx 7 //tamaño de matriz
 
 int matriz[tam_mtx][tam_mtx];
 int sensor_pos;             //registra si detecto o no un obstaculo
 int pos_x, pos_y;           //posicion actual del dispositivo
 int pos_dest_x, pos_dest_y; //posicion destino del dispositivo
-int direccion;
+int orientacion;            //orientacion del actual del dispositivo
+int prox_orientacion;       //orientacion del prox del dispositivo en el retorno
 bool mision_ok = false;
 
 int estado_actual = EST_REPOSO; //estado inical del sistema
@@ -112,24 +122,16 @@ bool abort_manual = false;      //abortar mision manualmente
 bool obst_encontrado = false;   //registra si se esta detectando un obstaculo o no
 
 char tecla;
+const char TECLA_ABORT = 'A';
+const int TEMP_TOPE = 60;
+const int DIST_TOPE = 70;
 
-/**
- * cero lugar sin explorar
- * 8 posicion actual
- * UNO posicion anterior, recorrido
- * DOS ostaculo
- * 
- */
-void init_matriz()
-{
-  for (int i = NUM_0; i < tam_mtx; i++)
-    for (int j = NUM_0; j < tam_mtx; j++)
-    {
-      matriz[i][j] = NUM_0;
-    }
-  pos_y = pos_x = NUM_0;
-  direccion = ESTE;
-}
+int matriz_giro[4][4] = {
+    {DIR_90, DIR_0, DIR_360, DIR_180},
+    {DIR_180, DIR_90, DIR_0, DIR_360},
+    {DIR_360, DIR_180, DIR_90, DIR_0},
+    {DIR_0, DIR_360, DIR_180, DIR_90},
+};
 
 void imprimir_matriz()
 {
@@ -137,47 +139,143 @@ void imprimir_matriz()
   {
     for (int j = NUM_0; j < tam_mtx; j++)
     {
-      Serial.print(matriz[i][j] );
+      Serial.print(matriz[i][j]);
       Serial.print("  ");
     }
     Serial.println();
   }
 }
 
-/*
- * CAPTURA Y CONVERSION DEL SENSOR DE PROXIMIDAD
- */
-void evaluar_obst()
-{
-  if (leer_sensor_prox() = LIBRE)
+////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////
+
+/**
+ * ROTAR SOBRE SI MISMO, DE SER NECESARIO
+ * AVANZAR A LA PORXIMA POSICION CONTIGUA
+ */ 
+void rotar_avanzar(int giro)
+{  
+  if (giro == DIR_360)
   {
-    escribir_ruta(LIBRE);
-    estado_actual = EST_MOV;
+    rotar_avanzar(DIR_180);
+    giro = 180;
   }
-  else
+
+  if (giro != DIR_90)
   {
-    escribir_ruta(OBSTACULO);
-    estado_actual = EST_OSTACULO;
+    servoMotor.write(giro);
+    digitalWrite(PIN_MOTOR, HIGH);
+  }
+  tiempo_actual_2 = millis(); //TEMPORIZADOR PARA ROTAR
+  while ((tiempo_actual_2 - tiempo_anterior_2) >= TIEMPO_MAX_MILIS_2)
+  {
+    tiempo_actual_2 = millis();
+  }
+  tiempo_anterior_2 = tiempo_actual_2;
+
+  digitalWrite(PIN_MOTOR, LOW);            //DETENER MOTOR
+  servoMotor.write(DIR_90);                // ENDEREZAR DIRECCION
+  rotar_avanzar(DIR_90);                   //ESPERAR TEMPORIZADOR DE ENDEREZADO
+  digitalWrite(PIN_MOTOR, (HIGH / NUM_4)); //AVANZAR A LA PROXIMA DIRECCION
+}
+/**
+ * orientacion del proximo paso en el retorno al origen
+ * reescritura de la matriz
+ */
+int prox_paso()
+{
+  if (((pos_y - 1) < 0) && matriz[pos_x][(pos_y - 1)] == RECORRIDO)
+  {
+    matriz[pos_x][(pos_y - 1)] = DISPO;
+    matriz[pos_x][pos_y] = OBSTACULO;
+    pos_y--;
+    return NORTE;
+  }
+
+  if (((pos_X + 1) >= tam_mtx) && matriz[pos_x + 1][pos_y] == RECORRIDO)
+  {
+    matriz[pos_x + 1][pos_y] = dispo;
+    matriz[pos_x][pos_y] = OBSTACULO;
+    pos_x++;
+    return ESTE;
+  }
+  if (((pos_y + 1) >= tam_mtx) && matriz[pos_x][pos_y + 1] == RECORRIDO)
+  {
+    matriz[pos_x][pos_y + 1] = dispo;
+    matriz[pos_x][pos_y] = OBSTACULO;
+    pos_y++;
+    return SUR;
+  }
+  if (((pos_X - 1) < 0) && matriz[pos_x - 1][pos_y] == RECORRIDO)
+  {
+    matriz[pos_x - 1][pos_y] = dispo;
+    matriz[pos_x][pos_y] = OBSTACULO;
+    pos_x--;
+    return OESTE;
   }
 }
 
-void escribir_ruta(int lectura)
+/**
+ * llegada al destino, retornando al origen por ruta marcada
+ */
+void retornar()
 {
-  switch (direccion)
+  prox_orientacion = prox_paso();
+  rotar_avanzar(matriz_giro[orientacion][prox_orientacion]);
+}
+
+/**
+ * obstaculo detectad, recalculado ruta
+ */
+void recalculando_ruta()
+{
+}
+/**
+ * verifica si no nos salimos del mapa y actualiza la matriz
+ */
+bool avanzar()
+{
+  switch (orientacion)
   {
-  case (NORTE):
-    matriz[pos_x][pos_y - 1] = lectura;
+  case NORTE:
+    if ((pos_y - 1) < 0)
+      return false;
+    matriz[pos_x][(pos_y - 1)] = DISPO;
+    matriz[pos_x][pos_y] = RECORRIDO;
+    pos_y--;
     break;
-  case (SUR):
-    matriz[pos_x][pos_y + 1] = lectura;
+  case ESTE:
+    if ((pos_X + 1) >= tam_mtx)
+      return false;
+    matriz[pos_x + 1][pos_y] = DISPO;
+    matriz[pos_x][pos_y] = RECORRIDO;
+    pos_x++;
     break;
-  case (ESTE):
-    matriz[pos_x + 1][pos_y] = lectura;
+  case SUR:
+    if ((pos_y + 1) >= tam_mtx)
+      return false;
+    matriz[pos_x][pos_y + 1] = DISPO;
+    matriz[pos_x][pos_y] = RECORRIDO;
+    pos_y++;
     break;
-  case (OESTE):
-    matriz[pos_x - 1][pos_y] = lectura;
+  case OESTE:
+    if ((pos_X - 1) < 0)
+      return false;
+    matriz[pos_x - 1][pos_y] = DISPO;
+    matriz[pos_x][pos_y] = RECORRIDO;
+    pos_x--;
     break;
   }
+  return true;
+}
+
+/**
+ * movimeinto a destino del  dispositivo
+ */
+void mover_dispo()
+{
+  if (avanzar())
+    digitalWrite(PIN_MOTOR, (HIGH / NUM_2)); // mitad de la velocidad maxima del motor
 }
 
 /**
@@ -213,6 +311,24 @@ void ingreso_coordenadas()
   lcd.setCursor(0, 1);
   lcd.print("COORDENADAS OK ");
 }
+/**
+ * cero lugar sin explorar
+ * 8 posicion actual
+ * UNO posicion anterior, recorrido
+ * DOS ostaculo
+ * 
+ */
+void init_matriz()
+{
+  for (int i = NUM_0; i < tam_mtx; i++)
+    for (int j = NUM_0; j < tam_mtx; j++)
+    {
+      matriz[i][j] = NUM_0;
+    }
+  pos_y = pos_x = NUM_0;
+  matriz[pos_y][pos_x] = DISPO;
+  orientacion = SUR; //orietnacion inicial del dispositivo
+}
 
 /**
  * revisar si la mision fue abortada o el dispositivo llego a destino
@@ -220,7 +336,10 @@ void ingreso_coordenadas()
 bool control_caos()
 {
   if (pos_x == pos_dest_x && pos_y == pos_dest_y) //dispositiovo llego a destino
+  {
+    mision_ok = true;
     return true;
+  }
   if (abort_manual) //finalizacion de mision manualmente por teclado
     return true;
   if (abort_temp) //finalizacin por deteccion de presencia por parte del senseor de temperatura
@@ -229,59 +348,14 @@ bool control_caos()
 }
 
 /**
- * Regula la velocidad del motor para avanzar o rotor
- */
-void actualizar_motor()
-{
-  if (estado_actual == EST_MOV)
-  {
-    digitalWrite(PIN_MOTOR, (HIGH / NUM_2)); // mitad de la velocidad maxima del motor
-  }
-  else if (estado_actual == EST_OSTACULO) //motor detenido
-  {
-    digitalWrite(PIN_MOTOR, LOW);
-  }
-  else if (estado_actual == EST_ROTAR)
-  {
-    digitalWrite(PIN_MOTOR, (HIGH / NUM_4)); //un cuarto de la velocidad maxcima del motor para roptar sobre si mismo
-  }
-}
-/**
- * llegada al destino, retornando al origen por ruta marcada
- */
-void retornar()
-{
-}
-
-/**
- * obstaculo detectad, recalculado ruta
- */
-void recalculando_ruta()
-{
-}
-
-/**
- * movimeinto a destino ddel  dispositivo
- */
-void mover_dispo()
-{
-  if (evaluar_obst())
-  {
-  }
-  actualizar_motor();
-}
-
-/*
- * EVALUA ES ESTADO DEL SISTEMA
+ * EVALUA EL ESTADO DEL SISTEMA
  */
 int evaluar_estado_actual()
 {
   if (control_caos() == true)
-    estado_actual = EST_RETORNOO;
+    estado_actual = EST_RETORNO;
   else if (obst_encontrado)
     estado_actual = EST_OSTACULO;
-  else if (mision_ok) //mision finalizada
-    estado_actual = EST_REPOSO;
   else
     estado_actual = EST_MOV;
 
@@ -311,7 +385,7 @@ void maquinadeEstado()
     lcd.print("OBSTACULO DETECTADO");
     recalculando_ruta();
     break;
-  case (EST_RETORNOO): // regresando al pnto de partida
+  case (EST_RETORNO): // regresando al pnto de partida
     lcd.print("RETORNANDO");
     retornar();
     break;
@@ -334,6 +408,9 @@ void actualizar_lcd()
 {
 }
 
+/**
+ *  LECTURA DEL SENSOR DE DISTACNIA ULTRASONICO 
+ */
 int leer_ultrasonido()
 {
   pinMode(PIN_PROX, OUTPUT);
@@ -349,16 +426,20 @@ int leer_ultrasonido()
   //Leo la señal ECHO y retorno distancia
   return (int)(DIST_EQUI * pulseIn(PIN_PROX, HIGH));
 }
-leer_sensores()
+
+/**
+ * RELEVAMIENTO DE LOS SENSORES
+ */
+void leer_sensores()
 {
   int temp_actual = (int)((VOLT / LECTURAMAX_TEMP * analogRead(SENSOR_TEMP)) * EQUIVALENCIA - MIN_TEMP);
   if (temp_actual > TEMP_TOPE)
     abort_temp = true;
   tecla = teclado4x4.getKey();
-  if (tecla && tecla == "A")
+  if (tecla == TECLA_ABORT)
     abort_manual = true;
 
-  if (leer_ultrasonido < DIST_TOPE)
+  if (leer_ultrasonido() >= DIST_TOPE)
     obst_encontrado = true;
   else
     obst_encontrado = false;
@@ -373,6 +454,8 @@ void setup()
   Servo.attach(PIN_SERVO);
   pinMode(PIN_MOTOR, OUTPUT);  //MOTOR
   pinMode(SENSOR_TEMP, INPUT); //sensor de temperatura
+  servoMotor.attach(PIN_SERVO);
+  servoMotor.write(DIR_90); //inicializa el servo
 }
 
 void loop()
