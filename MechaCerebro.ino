@@ -68,7 +68,7 @@ LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PI
 #define CARGA_VOLT 2.52
 
 #define TIEMPO_MAX_MILIS 250   // 0.25 segundo.
-#define TIEMPO_MAX_MILIS_2 500 // 0.5 segundo.
+#define TIEMPO_MAX_MILIS_2 100 // 0.1 segundo.
 
 #define ACTIVADO 1
 #define DESACTIVADO 0
@@ -97,7 +97,9 @@ LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PI
 
 #define NUM_100 100
 #define NUM_0 0
+#define NUM_1 1
 #define NUM_2 2
+#define NUM_3 3
 #define NUM_4 4
 #define NUM_7 7
 #define NUM_8 8
@@ -123,8 +125,8 @@ bool obst_encontrado = false;   //registra si se esta detectando un obstaculo o 
 
 char tecla;
 const char TECLA_ABORT = 'A';
-const int TEMP_TOPE = 60;
-const int DIST_TOPE = 70;
+
+int iter_giro = 0; //registra los giros del sensor que realizo
 
 int matriz_giro[4][4] = {
     {DIR_90, DIR_0, DIR_360, DIR_180},
@@ -133,6 +135,11 @@ int matriz_giro[4][4] = {
     {DIR_0, DIR_360, DIR_180, DIR_90},
 };
 
+int orient_vec[NUM_4] = {NORTE, ESTE, SUR, OESTE};
+
+/////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////
 void imprimir_matriz()
 {
   for (int i = NUM_0; i < tam_mtx; i++)
@@ -145,37 +152,22 @@ void imprimir_matriz()
     Serial.println();
   }
 }
-
-////////////////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////
-
 /**
  * ROTAR SOBRE SI MISMO, DE SER NECESARIO
  * AVANZAR A LA PORXIMA POSICION CONTIGUA
- */ 
+ */
 void rotar_avanzar(int giro)
-{  
+{
   if (giro == DIR_360)
   {
-    rotar_avanzar(DIR_180);
-    giro = 180;
+    rotar(DIR_180);
+    rotar(DIR_180);
   }
-
   if (giro != DIR_90)
   {
-    servoMotor.write(giro);
-    digitalWrite(PIN_MOTOR, HIGH);
+    rotar(giro);
   }
-  tiempo_actual_2 = millis(); //TEMPORIZADOR PARA ROTAR
-  while ((tiempo_actual_2 - tiempo_anterior_2) >= TIEMPO_MAX_MILIS_2)
-  {
-    tiempo_actual_2 = millis();
-  }
-  tiempo_anterior_2 = tiempo_actual_2;
-
-  digitalWrite(PIN_MOTOR, LOW);            //DETENER MOTOR
-  servoMotor.write(DIR_90);                // ENDEREZAR DIRECCION
-  rotar_avanzar(DIR_90);                   //ESPERAR TEMPORIZADOR DE ENDEREZADO
+  rotar(DIR_90);                           //ESPERAR TEMPORIZADOR DE ENDEREZADO
   digitalWrite(PIN_MOTOR, (HIGH / NUM_4)); //AVANZAR A LA PROXIMA DIRECCION
 }
 /**
@@ -184,7 +176,7 @@ void rotar_avanzar(int giro)
  */
 int prox_paso()
 {
-  if (((pos_y - 1) < 0) && matriz[pos_x][(pos_y - 1)] == RECORRIDO)
+  if (((pos_y - NUM_1) < 0) && matriz[pos_x][(pos_y - 1)] == RECORRIDO)
   {
     matriz[pos_x][(pos_y - 1)] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
@@ -192,23 +184,23 @@ int prox_paso()
     return NORTE;
   }
 
-  if (((pos_X + 1) >= tam_mtx) && matriz[pos_x + 1][pos_y] == RECORRIDO)
+  if (((pos_x + NUM_1) >= tam_mtx) && matriz[pos_x + 1][pos_y] == RECORRIDO)
   {
-    matriz[pos_x + 1][pos_y] = dispo;
+    matriz[pos_x + NUM_1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
     pos_x++;
     return ESTE;
   }
-  if (((pos_y + 1) >= tam_mtx) && matriz[pos_x][pos_y + 1] == RECORRIDO)
+  if (((pos_y + NUM_1) >= tam_mtx) && matriz[pos_x][pos_y + 1] == RECORRIDO)
   {
-    matriz[pos_x][pos_y + 1] = dispo;
+    matriz[pos_x][pos_y + 1] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
     pos_y++;
     return SUR;
   }
-  if (((pos_X - 1) < 0) && matriz[pos_x - 1][pos_y] == RECORRIDO)
+  if (((pos_x - NUM_1) < 0) && matriz[pos_x - 1][pos_y] == RECORRIDO)
   {
-    matriz[pos_x - 1][pos_y] = dispo;
+    matriz[pos_x - NUM_1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
     pos_x--;
     return OESTE;
@@ -223,12 +215,84 @@ void retornar()
   prox_orientacion = prox_paso();
   rotar_avanzar(matriz_giro[orientacion][prox_orientacion]);
 }
+/**
+ * permite rotar el dispositivo, se incorpora temporizador extra dado 
+ * que el servo y el dispositivo demorar en alcanzar su posicion deseada
+ */
+void rotar(int giro)
+{
+  servoMotor.write(giro);
+  if (giro != DIR_90)
+    digitalWrite(PIN_MOTOR, HIGH);
+  tiempo_actual_2 = millis(); //TEMPORIZADOR PARA ROTAR
+  while ((tiempo_actual_2 - tiempo_anterior_2) >= TIEMPO_MAX_MILIS_2)
+  {
+    tiempo_actual_2 = millis();
+  }
+  tiempo_anterior_2 = tiempo_actual_2;
 
+  digitalWrite(PIN_MOTOR, LOW); //DETENER MOTOR
+  servoMotor.write(DIR_90);     // ENDEREZAR DIRECCION
+}
+
+bool escribir_obst()
+{
+  switch (orientacion)
+  {
+  case NORTE:
+    if ((pos_y - NUM_1) < 0)
+      return false;
+    matriz[pos_x][(pos_y - 1)] = OBSTACULO;
+    break;
+  case ESTE:
+    if ((pos_x + NUM_1) >= tam_mtx)
+      return false;
+    matriz[pos_x + 1][pos_y] = OBSTACULO;
+    break;
+  case SUR:
+    if ((pos_y + NUM_1) >= tam_mtx)
+      return false;
+    matriz[pos_x][pos_y + 1] = OBSTACULO;
+    break;
+  case OESTE:
+    if ((pos_x - NUM_1) < 0)
+      return false;
+    matriz[pos_x - 1][pos_y] = OBSTACULO;
+    break;
+  }
+}
 /**
  * obstaculo detectad, recalculado ruta
  */
-void recalculando_ruta()
+void recalcular_ruta()
 {
+  escribir_obst();
+  switch (iter_giro)
+  {
+  case NUM_0: //IZQUIERDA
+    rotar(DIR_180);
+    iter_giro++;
+    orientacion = orient_vec[(orientacion - NUM_1) % NUM_4];
+    break;
+  case NUM_1: //DERECHA
+    rotar(DIR_0);
+    rotar(DIR_0);
+    orientacion = orient_vec[(orientacion + NUM_1) % NUM_4];
+    orientacion = orient_vec[(orientacion + NUM_1) % NUM_4];
+    iter_giro++;
+    break;
+  case NUM_2: //ATRAS
+    rotar(DIR_0);
+    orientacion = orient_vec[(orientacion + NUM_1) % NUM_4];
+    avanzar();
+    rotar(DIR_0);
+    rotar(DIR_0);
+    orientacion = orient_vec[(orientacion + NUM_1) % NUM_4];
+    orientacion = orient_vec[(orientacion + NUM_1) % NUM_4];
+    escribir_obst();
+    iter_giro = NUM_0;
+    break;
+  }
 }
 /**
  * verifica si no nos salimos del mapa y actualiza la matriz
@@ -238,28 +302,28 @@ bool avanzar()
   switch (orientacion)
   {
   case NORTE:
-    if ((pos_y - 1) < 0)
+    if ((pos_y - NUM_1) < 0 && matriz[pos_x][(pos_y - NUM_1)] != OBSTACULO)
       return false;
     matriz[pos_x][(pos_y - 1)] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
     pos_y--;
     break;
   case ESTE:
-    if ((pos_X + 1) >= tam_mtx)
+    if ((pos_x + 1) >= tam_mtx && matriz[pos_x + NUM_1][pos_y] != OBSTACULO)
       return false;
     matriz[pos_x + 1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
     pos_x++;
     break;
   case SUR:
-    if ((pos_y + 1) >= tam_mtx)
+    if ((pos_y + 1) >= tam_mtx && matriz[pos_x][pos_y + NUM_1] != OBSTACULO)
       return false;
     matriz[pos_x][pos_y + 1] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
     pos_y++;
     break;
   case OESTE:
-    if ((pos_X - 1) < 0)
+    if ((pos_x - 1) < 0 && matriz[pos_x - NUM_1][pos_y] != OBSTACULO)
       return false;
     matriz[pos_x - 1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
@@ -274,8 +338,21 @@ bool avanzar()
  */
 void mover_dispo()
 {
+  if (pos_x >= pos_dest_x)
+  {
+    rotar(DIR_90);
+    orientacion = orient_vec[(orientacion + NUM_1) % NUM_4];
+  }
+  /**
+   * false: fuera de rango u obstaculo encontrado
+   */
   if (avanzar())
+  {
     digitalWrite(PIN_MOTOR, (HIGH / NUM_2)); // mitad de la velocidad maxima del motor
+    iter_giro = NUM_0; //reinicio contador de giro
+  }
+  else
+    recalcular_ruta();
 }
 
 /**
@@ -383,7 +460,7 @@ void maquinadeEstado()
     break;
   case (EST_OSTACULO): //deteccion de ostaculo
     lcd.print("OBSTACULO DETECTADO");
-    recalculando_ruta();
+    recalcular_ruta();
     break;
   case (EST_RETORNO): // regresando al pnto de partida
     lcd.print("RETORNANDO");
@@ -401,12 +478,6 @@ void iniciar_lcd()
   lcd.print(" ");
 }
 
-/**
- * Imprime por la pantalla LCD en estado actual del sistema 
- */
-void actualizar_lcd()
-{
-}
 
 /**
  *  LECTURA DEL SENSOR DE DISTACNIA ULTRASONICO 
@@ -450,8 +521,7 @@ void setup()
   Serial.begin(SERIAL);
 
   lcd.begin(COL_DISPLAY, ROW_DISPLAY); //display de estado del sistema
-  //iniciar_lcd();
-  Servo.attach(PIN_SERVO);
+  iniciar_lcd();
   pinMode(PIN_MOTOR, OUTPUT);  //MOTOR
   pinMode(SENSOR_TEMP, INPUT); //sensor de temperatura
   servoMotor.attach(PIN_SERVO);
