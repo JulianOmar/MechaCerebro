@@ -76,14 +76,15 @@ LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PI
 /**
  * EST_REPOSO stado inicial, esperando ingreso de cooredenadas
  * EST_MOV dispositivio en movimieto
- * EST_OSTACULO deteccion de ostaculo, revaluando nueva ruita
+ * EST_OBSTACULO deteccion de ostaculo, revaluando nueva ruita
  * EST_RETORNOO regresando al origen
  * 
  */
 #define EST_REPOSO 0
-#define EST_MOV 1
-#define EST_OSTACULO 2
-#define EST_RETORNO 3
+#define EST_COORD 1
+#define EST_MOV 2
+#define EST_OBSTACULO 3
+#define EST_RETORNO 4
 
 #define NORTE 0
 #define ESTE 1
@@ -119,12 +120,15 @@ int prox_orientacion;       //orientacion del prox del dispositivo en el retorno
 bool mision_ok = false;
 
 int estado_actual = EST_REPOSO; //estado inical del sistema
-bool abort_temp = false;        //abortar mision por temperatura
-bool abort_manual = false;      //abortar mision manualmente
-bool obst_encontrado = false;   //registra si se esta detectando un obstaculo o no
+int estado_anterior;
+bool init = true;             //inicio del sistema
+bool abort_temp = false;      //abortar mision por temperatura
+bool abort_manual = false;    //abortar mision manualmente
+bool obst_encontrado = false; //registra si se esta detectando un obstaculo o no
 
 char tecla;
 const char TECLA_ABORT = 'A';
+const char TECLA_INICIO = '#';
 
 int iter_giro = 0; //registra los giros del sensor que realizo
 
@@ -176,7 +180,7 @@ void rotar_avanzar(int giro)
  */
 int prox_paso()
 {
-  if (((pos_y - NUM_1) < 0) && matriz[pos_x][(pos_y - 1)] == RECORRIDO)
+  if (((pos_y - NUM_1) < NUM_0) && matriz[pos_x][(pos_y - NUM_1)] == RECORRIDO)
   {
     matriz[pos_x][(pos_y - 1)] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
@@ -184,7 +188,7 @@ int prox_paso()
     return NORTE;
   }
 
-  if (((pos_x + NUM_1) >= tam_mtx) && matriz[pos_x + 1][pos_y] == RECORRIDO)
+  if (((pos_x + NUM_1) >= tam_mtx) && matriz[pos_x + NUM_1][pos_y] == RECORRIDO)
   {
     matriz[pos_x + NUM_1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
@@ -193,12 +197,12 @@ int prox_paso()
   }
   if (((pos_y + NUM_1) >= tam_mtx) && matriz[pos_x][pos_y + 1] == RECORRIDO)
   {
-    matriz[pos_x][pos_y + 1] = DISPO;
+    matriz[pos_x][pos_y + NUM_1] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
     pos_y++;
     return SUR;
   }
-  if (((pos_x - NUM_1) < 0) && matriz[pos_x - 1][pos_y] == RECORRIDO)
+  if (((pos_x - NUM_1) < NUM_0) && matriz[pos_x - NUM_1][pos_y] == RECORRIDO)
   {
     matriz[pos_x - NUM_1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = OBSTACULO;
@@ -240,24 +244,24 @@ bool escribir_obst()
   switch (orientacion)
   {
   case NORTE:
-    if ((pos_y - NUM_1) < 0)
+    if ((pos_y - NUM_1) < NUM_0)
       return false;
-    matriz[pos_x][(pos_y - 1)] = OBSTACULO;
+    matriz[pos_x][(pos_y - NUM_1)] = OBSTACULO;
     break;
   case ESTE:
     if ((pos_x + NUM_1) >= tam_mtx)
       return false;
-    matriz[pos_x + 1][pos_y] = OBSTACULO;
+    matriz[pos_x + NUM_1][pos_y] = OBSTACULO;
     break;
   case SUR:
     if ((pos_y + NUM_1) >= tam_mtx)
       return false;
-    matriz[pos_x][pos_y + 1] = OBSTACULO;
+    matriz[pos_x][pos_y + NUM_1] = OBSTACULO;
     break;
   case OESTE:
-    if ((pos_x - NUM_1) < 0)
+    if ((pos_x - NUM_1) < NUM_0)
       return false;
-    matriz[pos_x - 1][pos_y] = OBSTACULO;
+    matriz[pos_x - NUM_1][pos_y] = OBSTACULO;
     break;
   }
 }
@@ -302,30 +306,30 @@ bool avanzar()
   switch (orientacion)
   {
   case NORTE:
-    if ((pos_y - NUM_1) < 0 && matriz[pos_x][(pos_y - NUM_1)] != OBSTACULO)
+    if ((pos_y - NUM_1) < NUM_0 && matriz[pos_x][(pos_y - NUM_1)] != OBSTACULO)
       return false;
-    matriz[pos_x][(pos_y - 1)] = DISPO;
+    matriz[pos_x][(pos_y - NUM_1)] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
     pos_y--;
     break;
   case ESTE:
-    if ((pos_x + 1) >= tam_mtx && matriz[pos_x + NUM_1][pos_y] != OBSTACULO)
+    if ((pos_x + NUM_1) >= tam_mtx && matriz[pos_x + NUM_1][pos_y] != OBSTACULO)
       return false;
-    matriz[pos_x + 1][pos_y] = DISPO;
+    matriz[pos_x + NUM_1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
     pos_x++;
     break;
   case SUR:
-    if ((pos_y + 1) >= tam_mtx && matriz[pos_x][pos_y + NUM_1] != OBSTACULO)
+    if ((pos_y + NUM_1) >= tam_mtx && matriz[pos_x][pos_y + NUM_1] != OBSTACULO)
       return false;
-    matriz[pos_x][pos_y + 1] = DISPO;
+    matriz[pos_x][pos_y + NUM_1] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
     pos_y++;
     break;
   case OESTE:
-    if ((pos_x - 1) < 0 && matriz[pos_x - NUM_1][pos_y] != OBSTACULO)
+    if ((pos_x - NUM_1) < NUM_0 && matriz[pos_x - NUM_1][pos_y] != OBSTACULO)
       return false;
-    matriz[pos_x - 1][pos_y] = DISPO;
+    matriz[pos_x - NUM_1][pos_y] = DISPO;
     matriz[pos_x][pos_y] = RECORRIDO;
     pos_x--;
     break;
@@ -349,7 +353,7 @@ void mover_dispo()
   if (avanzar())
   {
     digitalWrite(PIN_MOTOR, (HIGH / NUM_2)); // mitad de la velocidad maxima del motor
-    iter_giro = NUM_0; //reinicio contador de giro
+    iter_giro = NUM_0;                       //reinicio contador de giro
   }
   else
     recalcular_ruta();
@@ -365,7 +369,7 @@ void ingreso_coordenadas()
   {
     if (error)
     {
-      lcd.setCursor(0, 1);
+      lcd.setCursor(NUM_0, NUM_1);
       lcd.print("ERROR DE COORD ");
       error = false;
     }
@@ -385,7 +389,7 @@ void ingreso_coordenadas()
     error = true;
   } while (pos_dest_x < tam_mtx && pos_dest_y < tam_mtx);
   lcd.clear();
-  lcd.setCursor(0, 1);
+  lcd.setCursor(NUM_0, NUM_1);
   lcd.print("COORDENADAS OK ");
 }
 /**
@@ -417,8 +421,7 @@ bool control_caos()
     mision_ok = true;
     return true;
   }
-  if (abort_manual) //finalizacion de mision manualmente por teclado
-    return true;
+
   if (abort_temp) //finalizacin por deteccion de presencia por parte del senseor de temperatura
     return true;
   return false;
@@ -429,11 +432,36 @@ bool control_caos()
  */
 int evaluar_estado_actual()
 {
-  if (control_caos() == true)
+  tecla = teclado4x4.getKey(); // CAPTURA DE INGRESO DEL TECLADO
+
+  if (tecla)
+  {
+    switch (estado_actual)
+    {
+    case EST_REPOSO:
+      if (tecla == TECLA_INICIO)
+      {
+        init_matriz();
+        estado_actual = EST_COORD;
+      }
+      break;
+    case EST_MOV:
+      if (tecla == TECLA_ABORT) //finalizacion de mision manualmente por teclado
+        estado_actual = EST_RETORNO;
+      break;
+    case EST_OBSTACULO:
+      if (tecla == TECLA_ABORT) //finalizacion de mision manualmente por teclado
+        estado_actual = EST_RETORNO;
+      break;
+    }
+  }
+  leer_sensores();
+  if ((estado_actual == EST_OBSTACULO || estado_actual == EST_MOV) && control_caos())
     estado_actual = EST_RETORNO;
-  else if (obst_encontrado)
-    estado_actual = EST_OSTACULO;
-  else
+
+  else if (obst_encontrado && estado_actual == EST_MOV)
+    estado_actual = EST_OBSTACULO;
+  else if (estado_actual != EST_REPOSO && estado_actual != EST_COORD)
     estado_actual = EST_MOV;
 
   return estado_actual;
@@ -445,39 +473,44 @@ int evaluar_estado_actual()
  */
 void maquinadeEstado()
 {
+  estado_anterior = estado_actual;
   lcd.clear();
-  lcd.setCursor(0, 0);
+  lcd.setCursor(NUM_0, NUM_0);
   switch (evaluar_estado_actual())
   {
   case (EST_REPOSO): // estado inicial
+
     lcd.print("ESTADO EN REPOPSO");
-    init_matriz();
+    if (estado_actual != estado_anterior || init)
+      Serial.println("ESTADO EN REPOPSO");
+    init = false;
+    break;
+  case (EST_COORD): // estado EN ESPERA DE COORDENADAS
+    lcd.print("ESTADO ESPERANDO COORD");
+    if (estado_actual != estado_anterior)
+      Serial.println("ESTADO ESPERANDO COORD");
     ingreso_coordenadas();
     break;
   case (EST_MOV): //dispositivo en movimiento
     lcd.print("ESTADO EN MOVIMIENTO");
+    if (estado_actual != estado_anterior)
+      Serial.println("ESTADO EN MOVIMIENTO");
     mover_dispo();
     break;
-  case (EST_OSTACULO): //deteccion de ostaculo
+  case (EST_OBSTACULO): //deteccion de ostaculo
     lcd.print("OBSTACULO DETECTADO");
+    if (estado_actual != estado_anterior)
+      Serial.println("OBSTACULO DETECTADO");
     recalcular_ruta();
     break;
   case (EST_RETORNO): // regresando al pnto de partida
     lcd.print("RETORNANDO");
+    if (estado_actual != estado_anterior)
+      Serial.println("RETORNANDO");
     retornar();
     break;
   }
 }
-
-void iniciar_lcd()
-{
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("");
-  lcd.setCursor(0, 1);
-  lcd.print(" ");
-}
-
 
 /**
  *  LECTURA DEL SENSOR DE DISTACNIA ULTRASONICO 
@@ -504,13 +537,12 @@ int leer_ultrasonido()
 void leer_sensores()
 {
   int temp_actual = (int)((VOLT / LECTURAMAX_TEMP * analogRead(SENSOR_TEMP)) * EQUIVALENCIA - MIN_TEMP);
-  if (temp_actual > TEMP_TOPE)
+  if (temp_actual > TEMP_TOPE) // aborta por execo de temperatura
     abort_temp = true;
-  tecla = teclado4x4.getKey();
-  if (tecla == TECLA_ABORT)
-    abort_manual = true;
+  else
+    abort_temp = false;
 
-  if (leer_ultrasonido() >= DIST_TOPE)
+  if (leer_ultrasonido() >= DIST_TOPE) // se detecto la presencia de un obstaculo
     obst_encontrado = true;
   else
     obst_encontrado = false;
@@ -519,9 +551,8 @@ void leer_sensores()
 void setup()
 {
   Serial.begin(SERIAL);
-
   lcd.begin(COL_DISPLAY, ROW_DISPLAY); //display de estado del sistema
-  iniciar_lcd();
+  lcd.display();
   pinMode(PIN_MOTOR, OUTPUT);  //MOTOR
   pinMode(SENSOR_TEMP, INPUT); //sensor de temperatura
   servoMotor.attach(PIN_SERVO);
@@ -539,7 +570,6 @@ void loop()
   {
     // Actualizo el tiempo anterior.
     tiempo_anterior = tiempo_actual;
-    leer_sensores();
     maquinadeEstado();
   }
 }
